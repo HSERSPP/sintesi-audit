@@ -1471,10 +1471,11 @@ function onRepartoChange() {
   aggiornaDpiInfo();
 
   // Aggiorna la checklist stabilimento in base al reparto
-  // SOLO se la checklist non è ancora stata costruita (evita perdita dati)
+  // Ricostruisce solo se il reparto è diverso da quello per cui la checklist era già stata costruita
+  // (le risposte già date vengono ripristinate visivamente da buildChecklist)
   if (auditType === 'stabilimento') {
     const container = document.getElementById('checklist-container');
-    if (!container || container.innerHTML.trim() === '') {
+    if (!container || container.dataset.builtFor !== reparto) {
       buildChecklist('stabilimento');
     }
   }
@@ -1598,12 +1599,20 @@ function goBack() {
 function buildChecklist(type) {
   const container = document.getElementById('checklist-container');
   container.innerHTML = '';
-  let sections = type==='cantiere' ? CHECKLIST_CANTIERE : [...getStabilimentoSections(document.getElementById('f-reparto')?.value), INTERVISTE_STABILIMENTO];
+  const repartoCorrente = document.getElementById('f-reparto')?.value || '';
+  container.dataset.builtFor = repartoCorrente;
+  let sections = type==='cantiere' ? CHECKLIST_CANTIERE : [...getStabilimentoSections(repartoCorrente), INTERVISTE_STABILIMENTO];
   sections.forEach(sec => {
     const div = document.createElement('div');
     div.innerHTML = `<div class="sec-header"><div class="sec-header-letter">${sec.letter}</div><h3>${sec.title}</h3></div><div class="sec-body" id="sb-${sec.letter}"></div>`;
     container.appendChild(div);
     sec.voci.forEach(v => buildRow(div.querySelector(`#sb-${sec.letter}`), v, type));
+  });
+  // Ripristina visivamente le risposte già date (es. dopo un cambio di reparto)
+  Object.keys(responses).forEach(id => {
+    if (responses[id]?.val && document.getElementById(`row-${id}`)) {
+      setVal(id, responses[id].val);
+    }
   });
 }
 
