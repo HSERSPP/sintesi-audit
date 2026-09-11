@@ -8,6 +8,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
 <title>MOD7.401 — Audit HSE | Somec Sintesi</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+  // Fallback: se jsPDF non si carica dal primo CDN (rete aziendale, firewall, momentanea indisponibilita),
+  // lo ricarica automaticamente da un secondo provider, senza bisogno di ricaricare la pagina.
+  window.addEventListener('load', function(){
+    if (!window.jspdf) {
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js';
+      document.head.appendChild(s);
+    }
+  });
+</script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -2166,6 +2177,10 @@ async function correctImageOrientationAsync(dataUrl) {
 function buildAuditPDF() {
   const data = collectFormData();
 
+  if (!window.jspdf) {
+    alert('⏳ La libreria per generare il PDF non è ancora pronta (probabile connessione lenta o rete che blocca il caricamento). Attendi qualche secondo e riprova. Se il problema persiste, prova a ricaricare la pagina (tasto aggiorna del browser).');
+    throw new Error('jsPDF non disponibile');
+  }
   const {jsPDF} = window.jspdf;
   const doc = new jsPDF({orientation:'p',unit:'mm',format:'a4'});
   const W=210, ML=14, MR=14, CW=W-ML-MR;
