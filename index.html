@@ -615,9 +615,7 @@ async function saveAuditToFirebase(data, proto) {
   if (!firestoreDB) { console.warn('Firestore non inizializzato'); return; }
   try {
     // Raccogli NC e OBS con tutti i dettagli per SPI
-    const allSections = data.auditType === 'cantiere'
-      ? CHECKLIST_CANTIERE
-      : [...getStabilimentoSections(data.reparto), INTERVISTE_STABILIMENTO];
+    const allSections = getAuditSections(data.auditType);
 
     const nc_list = [], obs_list = [];
     allSections.forEach(sec => {
@@ -709,8 +707,8 @@ async function saveAuditToFirebase(data, proto) {
       // Interviste
       interviste: interviste_db,
 
-      // Conformita documentale (sezione E)
-      conformita_doc: allSections.find(s => s.letter === 'E')?.voci
+      // Conformita documentale (cantiere refitting: sezione F — ufficio/magazzino: sezione D)
+      conformita_doc: allSections.find(s => s.letter === (data.auditType === 'cantiere' ? 'F' : 'D'))?.voci
         .filter(v => responses[v.id]?.val === 'NC').length || 0,
 
       // Testo libero
@@ -848,6 +846,18 @@ const INTERVISTE_STABILIMENTO = {
 // più tutte le sezioni trasversali (senza repartoTag).
 function getStabilimentoSections(reparto) {
   return CHECKLIST_STABILIMENTO.filter(sec => !sec.repartoTag || sec.repartoTag === reparto);
+}
+
+// Sezioni complete dell'audit: usata da PDF, email, Firebase, progress e validazione.
+// Include la checklist attrezzature del reparto (es. MAG), prima esclusa da PDF/email/Firebase.
+function getAuditSections(type) {
+  if (type === 'cantiere') return CHECKLIST_CANTIERE;
+  const reparto = document.getElementById('f-reparto')?.value || '';
+  const sections = [...getStabilimentoSections(reparto), INTERVISTE_STABILIMENTO];
+  if (reparto && typeof CHECKLIST_ATTREZZATURE !== 'undefined' && CHECKLIST_ATTREZZATURE[reparto]) {
+    sections.push({ letter:'ATT', title:'Attrezzature reparto ' + reparto, voci: CHECKLIST_ATTREZZATURE[reparto] });
+  }
+  return sections;
 }
 
 
@@ -1564,7 +1574,7 @@ let auditType = null;
 let responses = {};   // { id: { val, note, level, photos:[{dataUrl,caption}] } }
 let generalPhotos = []; // foto non legate a voci
 let sigData = {};
-const DRAFT_KEY = 'somec_audit_draft_v2';
+const DRAFT_KEY = 'sintesi_audit_draft_v2';
 
 // ==========================================
 // AVVIO
@@ -1640,7 +1650,7 @@ function buildRow(container, voce, type) {
   // DETTAGLIO (nota + livello NC + foto inline) -- appare solo per OBS/NC
   const det = document.createElement('div');
   det.className = 'cl-detail'; det.id = `det-${voce.id}`;
-  const ncLevelHtml = type==='cantiere' ? `
+  const ncLevelHtml = `
     <div class="nc-level-wrap" id="ncl-${voce.id}">
       <span class="nc-level-label">Livello NC:</span>
       <button class="nc-level-btn" data-lv="1" onclick="setNcLevel('${voce.id}',1)">1 — Minore</button>
@@ -1651,10 +1661,6 @@ function buildRow(container, voce, type) {
       <span class="ac-deadline-label">Scadenza AC:</span>
       <input type="date" class="ac-deadline-input" id="acdl-date-${voce.id}" onchange="saveDeadline('${voce.id}',this.value)">
       <span style="font-size:11px;color:var(--text-light)">Data entro cui chiudere l'azione correttiva</span>
-    </div>` : `
-    <div class="ac-deadline-wrap" id="acdl-${voce.id}">
-      <span class="ac-deadline-label">Scadenza AC:</span>
-      <input type="date" class="ac-deadline-input" id="acdl-date-${voce.id}" onchange="saveDeadline('${voce.id}',this.value)">
     </div>`;
   det.innerHTML = `
     <div class="nc-suggestion" id="sug-${voce.id}"></div>
@@ -1910,7 +1916,7 @@ function updateCounts() {
 }
 
 function updateProgress() {
-  const sections = auditType==='cantiere' ? CHECKLIST_CANTIERE : [...getStabilimentoSections(document.getElementById('f-reparto')?.value), INTERVISTE_STABILIMENTO];
+  const sections = getAuditSections(auditType);
   let total=0; sections.forEach(s => total+=s.voci.length);
   const done = Object.values(responses).filter(r=>r.val).length;
   const hok = document.getElementById('f-sito').value && document.getElementById('f-data').value ? 2 : 0;
@@ -2059,7 +2065,7 @@ function hasData() {
 // VALIDAZIONE CHECKLIST COMPLETA
 // ==========================================
 function validateChecklist() {
-  const sections = auditType==='cantiere' ? CHECKLIST_CANTIERE : [...getStabilimentoSections(document.getElementById('f-reparto')?.value), INTERVISTE_STABILIMENTO];
+  const sections = getAuditSections(auditType);
   const missing = [];
   sections.forEach(sec => {
     sec.voci.forEach(v => {
@@ -2067,15 +2073,6 @@ function validateChecklist() {
       if (!r || !r.val) missing.push({ id: v.id, secTitle: sec.title, secLetter: sec.letter, text: v.text });
     });
   });
-  // Includi anche voci attrezzature se presenti (stabilimento con reparto selezionato)
-  if (auditType === 'stabilimento') {
-    const reparto = document.getElementById('f-reparto')?.value;
-    const vociAttr = reparto ? (CHECKLIST_ATTREZZATURE[reparto] || []) : [];
-    vociAttr.forEach(v => {
-      const r = responses[v.id];
-      if (!r || !r.val) missing.push({ id: v.id, secTitle: 'Attrezzature reparto ' + reparto, secLetter: '🔧', text: v.text });
-    });
-  }
   return missing;
 }
 
@@ -2114,7 +2111,7 @@ function scrollToVoce(id) {
 
 function scrollToFirstMissing() {
   closeModal('modal-validation');
-  const sections = auditType==='cantiere' ? CHECKLIST_CANTIERE : [...getStabilimentoSections(document.getElementById('f-reparto')?.value), INTERVISTE_STABILIMENTO];
+  const sections = getAuditSections(auditType);
   for (const sec of sections) {
     for (const v of sec.voci) {
       if (!responses[v.id]?.val) { scrollToVoce(v.id); return; }
@@ -2253,7 +2250,7 @@ function buildAuditPDF() {
   }
 
   // -- SEZIONI CHECKLIST --
-  const sections = data.auditType==='cantiere' ? CHECKLIST_CANTIERE : [...getStabilimentoSections(data.reparto), INTERVISTE_STABILIMENTO];
+  const sections = getAuditSections(data.auditType);
   const lvColors = {1:[243,156,18],2:[230,126,34],3:[192,57,43]};
   const lvLabels = {1:'NC — Livello 1 (Minore)',2:'NC — Livello 2 (Medio)',3:'NC — Livello 3 (Elevato)'};
   const obsLvLabels = {1:'Priorita bassa',2:'Priorita media',3:'Priorita alta'};
@@ -2628,7 +2625,7 @@ async function confirmSend() {
   let c=0,obs=0,nc=0,na=0;
   Object.values(responses).forEach(r=>{ if(r.val==='C')c++; else if(r.val==='OBS')obs++; else if(r.val==='NC')nc++; else if(r.val==='NA')na++; });
 
-  const sections = data.auditType==='cantiere' ? CHECKLIST_CANTIERE : [...getStabilimentoSections(data.reparto), INTERVISTE_STABILIMENTO];
+  const sections = getAuditSections(data.auditType);
   let ncList='', obsList='';
   sections.forEach(sec => sec.voci.forEach(v => {
     const r=responses[v.id]||{};
@@ -2702,7 +2699,7 @@ async function confirmSend() {
         <p style="margin-top:16px;font-size:11px;color:#888">Il report completo con foto, firme e interviste e allegato a questa email in formato PDF.</p>
       </div>
       <div style="background:#e8eaed;padding:8px 20px;border-radius:0 0 6px 6px;font-size:10px;color:#888">
-        SOMEC Navale HSE — Generato da SOMEC Audit App — ${new Date().toLocaleDateString('it-IT')}
+        SOMEC Sintesi HSE — Generato da SOMEC Audit App — ${new Date().toLocaleDateString('it-IT')}
       </div>
     </div>`;
 
